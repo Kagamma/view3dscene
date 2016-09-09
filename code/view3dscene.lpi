@@ -41,7 +41,7 @@
         <PackageName Value="castle_base"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="32">
+    <Units Count="33">
       <Unit0>
         <Filename Value="view3dscene.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -125,6 +125,7 @@
       <Unit20>
         <Filename Value="v3dsceneoctreevisualize.pas"/>
         <IsPartOfProject Value="True"/>
+        <UnitName Value="V3DSceneOctreeVisualize"/>
       </Unit20>
       <Unit21>
         <Filename Value="v3dsceneimages.pas"/>
@@ -141,6 +142,7 @@
       <Unit24>
         <Filename Value="v3dsceneantialiasing.pas"/>
         <IsPartOfProject Value="True"/>
+        <UnitName Value="V3DSceneAntiAliasing"/>
       </Unit24>
       <Unit25>
         <Filename Value="v3dsceneraytrace.pas"/>
@@ -153,6 +155,7 @@
       <Unit27>
         <Filename Value="v3dscenecaptions.pas"/>
         <IsPartOfProject Value="True"/>
+        <UnitName Value="V3DSceneCaptions"/>
       </Unit27>
       <Unit28>
         <Filename Value="screen_effects_edge_detect.glsl.inc"/>
@@ -170,6 +173,11 @@
         <Filename Value="v3dsceneboxes.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit31>
+      <Unit32>
+        <Filename Value="v3dscenefilewatcher.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="V3DSceneFileWatcher"/>
+      </Unit32>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
@@ -196,6 +204,7 @@
     </CodeGeneration>
     <Linking>
       <Debugging>
+        <GenerateDebugInfo Value="False"/>
         <UseHeaptrc Value="True"/>
       </Debugging>
     </Linking>
