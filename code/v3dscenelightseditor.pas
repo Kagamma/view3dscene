@@ -1,5 +1,5 @@
 {
-  Copyright 2006-2014 Michalis Kamburelis.
+  Copyright 2006-2016 Michalis Kamburelis.
 
   This file is part of "view3dscene".
 
@@ -15,7 +15,7 @@
 
   You should have received a copy of the GNU General Public License
   along with "view3dscene"; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
 
   ----------------------------------------------------------------------------
 }
@@ -40,9 +40,11 @@ procedure LightsEditorClose;
 
 implementation
 
-uses SysUtils, CastleVectors, Classes, X3DNodes, CastleOnScreenMenu, CastleBoxes,
-  CastleMessages, CastleUtils, CastleGLUtils, CastleUIControls, CastleRectangles,
-  CastleControls;
+uses SysUtils, Classes, CastleColors,
+  CastleVectors, X3DNodes, CastleOnScreenMenu, CastleBoxes, Castle3D,
+  CastleMessages, CastleUtils, CastleGLUtils, CastleUIControls,
+  CastleRectangles, CastleControls, CastleScene,
+  V3DSceneImages;
 
 { TCastleOnScreenMenu descendants -------------------------------------------- }
 
@@ -114,7 +116,8 @@ type
     procedure ClickShadows(Sender: TObject);
     procedure ClickShadowVolumes(Sender: TObject);
     procedure ClickShadowVolumesMain(Sender: TObject);
-    procedure ClickBack(Sender: TObject);
+  strict protected
+    procedure ClickBack(Sender: TObject); virtual;
   public
     constructor Create(AOwner: TComponent; ALight: TAbstractLightNode); reintroduce;
     procedure AfterCreate;
@@ -123,9 +126,11 @@ type
   TPositionalLightMenu = class(TLightMenu)
   strict private
     Light: TAbstractPositionalLightNode;
-    PositionSlider, AttenuationSlider: TMenuVector3Sliders;
-    procedure PositionChanged(Sender: TObject);
+    LocationSlider, AttenuationSlider: TMenuVector3Sliders;
+    procedure LocationChanged(Sender: TObject);
     procedure AttenuationChanged(Sender: TObject);
+  strict protected
+    procedure ClickBack(Sender: TObject); override;
   public
     constructor Create(AOwner: TComponent; ALight: TAbstractPositionalLightNode); reintroduce;
   end;
@@ -188,15 +193,114 @@ var
   WindowMarginTop: Integer;
 
   LightsMenu: TLightsMenu;
+  Gizmo: TCastleScene;
+  GizmoTransform: T3DTransform;
 
 procedure SetCurrentMenu(const NewValue: TCastleOnScreenMenu);
 begin
-  Window.Controls.MakeSingle(TCastleOnScreenMenu, NewValue, false);
+  Window.Controls.MakeSingle(TCastleOnScreenMenu, NewValue, true);
 end;
 
 function LightsEditorIsOpen: boolean;
 begin
   Result := SceneManager <> nil;
+end;
+
+{ Enlarged scene manager bounding box, never empty. }
+function SceneManagerLargerBox(const SceneManager: TCastleSceneManager): TBox3D;
+const
+  DefaultSize = 10;
+var
+  BoxSizes: TVector3Single;
+begin
+  Result := SceneManager.Items.BoundingBox;
+  if Result.IsEmpty then
+    Result := Box3D(
+      Vector3Single(-DefaultSize, -DefaultSize, -DefaultSize),
+      Vector3Single( DefaultSize,  DefaultSize,  DefaultSize)) else
+  begin
+    BoxSizes := Result.Sizes;
+    Result.Data[0] := Result.Data[0] - BoxSizes;
+    Result.Data[1] := Result.Data[1] + BoxSizes;
+  end;
+end;
+
+procedure IniitalizeGizmo;
+const
+  LightGizmoPivot: TVector2Single = (58.5, 146 - 58.5);
+var
+  RootNode: TX3DRootNode;
+  Billboard: TBillboardNode;
+  Shape: TShapeNode;
+  Appearance: TAppearanceNode;
+  Texture: TPixelTextureNode;
+  Material: TMaterialNode;
+  Quad: TQuadSetNode;
+  QuadRect: TFloatRectangle;
+  QuadCoords: TCoordinateNode;
+  QuadTexCoords: TTextureCoordinateNode;
+  Size: Single;
+begin
+  Size := SceneManagerLargerBox(SceneManager).AverageSize / 50;
+
+  QuadRect.Left   := - LightGizmoPivot[0];
+  QuadRect.Bottom := - LightGizmoPivot[1];
+  QuadRect.Width  := Light_Gizmo.Width;
+  QuadRect.Height := Light_Gizmo.Height;
+  QuadRect := QuadRect.ScaleAround0(Size / Light_Gizmo.Width);
+
+  QuadCoords := TCoordinateNode.Create;
+  QuadCoords.FdPoint.Items.AssignArray([
+    Vector3Single(QuadRect.Left , QuadRect.Bottom, 0),
+    Vector3Single(QuadRect.Right, QuadRect.Bottom, 0),
+    Vector3Single(QuadRect.Right, QuadRect.Top, 0),
+    Vector3Single(QuadRect.Left , QuadRect.Top, 0)
+  ]);
+
+  QuadTexCoords := TTextureCoordinateNode.Create;
+  QuadTexCoords.FdPoint.Items.AssignArray([
+    Vector2Single(0, 0),
+    Vector2Single(1, 0),
+    Vector2Single(1, 1),
+    Vector2Single(0, 1)
+  ]);
+
+  Quad := TQuadSetNode.Create;
+  Quad.FdCoord.Value := QuadCoords;
+  Quad.FdTexCoord.Value := QuadTexCoords;
+
+  Material := TMaterialNode.Create;
+  Material.ForcePureEmissive;
+  Material.EmissiveColor := YellowRGB;
+
+  Texture := TPixelTextureNode.Create;
+  Texture.FdImage.Value := Light_Gizmo.MakeCopy;
+
+  Appearance := TAppearanceNode.Create;
+  Appearance.Material := Material;
+  Appearance.Texture := Texture;
+
+  Shape := TShapeNode.Create;
+  Shape.Geometry := Quad;
+  Shape.Appearance := Appearance;
+
+  Billboard := TBillboardNode.Create;
+  Billboard.AxisOfRotation := ZeroVector3Single;
+  Billboard.FdChildren.Add(Shape);
+
+  RootNode := TX3DRootNode.Create;
+  RootNode.FdChildren.Add(Billboard);
+
+  Gizmo := TCastleScene.Create(Window);
+  Gizmo.Load(RootNode, true);
+  Gizmo.Collides := false;
+  Gizmo.Pickable := false;
+  Gizmo.CastShadowVolumes := false;
+  Gizmo.ProcessEvents := true; // for Billboard to work
+
+  GizmoTransform := T3DTransform.Create(Window);
+  GizmoTransform.Exists := false; // initially not existing
+  GizmoTransform.Add(Gizmo);
 end;
 
 procedure LightsEditorOpen(const ASceneManager: TCastleSceneManager;
@@ -211,6 +315,11 @@ begin
   LightsMenu := TLightsMenu.Create(nil);
   SetCurrentMenu(LightsMenu);
   MenuLightsEditor.Checked := true;
+
+  { create GizmoTransform on demand }
+  if GizmoTransform = nil then
+    IniitalizeGizmo;
+  SceneManager.Items.Add(GizmoTransform);
 end;
 
 procedure LightsEditorClose;
@@ -219,8 +328,14 @@ begin
 
   SetCurrentMenu(nil);
 
+  { Just free Gizmo stuff, it will be recreated next time.
+    This makes sure we update gizmo Size when loading different scenes. }
+  // SceneManager.Items.Remove(GizmoTransform);
+  FreeAndNil(GizmoTransform);
+  FreeAndNil(Gizmo);
+
   { We don't immediately free here LightsMenu instance, because this is called
-    also by TLightsMenu.CickClose, and we should not free ourselves
+    also by TLightsMenu.ClickClose, and we should not free ourselves
     from our own method. So instead leave LightsMenu instance existing,
     but make sure (for speed) that it's not connected by DestructionNotifications
     to our scene. }
@@ -604,47 +719,51 @@ end;
 { TPositionalLightMenu ------------------------------------------------------- }
 
 constructor TPositionalLightMenu.Create(AOwner: TComponent; ALight: TAbstractPositionalLightNode);
-const
-  DefaultSize = 10;
 var
   Box: TBox3D;
-  BoxSizes: TVector3Single;
 begin
   inherited Create(AOwner, ALight);
   Light := ALight;
 
   { determine sensible lights positions.
-    Box doesn't depend on Light.FdLocation, to not change range each time
-    --- but this causes troubles, as Light.FdLocation may not fit within range,
+    Box doesn't depend on Light.SceneLocation, to not change range each time
+    --- but this causes troubles,
+    as Light.SceneLocation may not fit within range,
     which is uncomfortable (works Ok, but not nice for user). }
-  Box := SceneManager.Items.BoundingBox;
-  if Box.IsEmpty then
-    Box := Box3D(Vector3Single(-DefaultSize, -DefaultSize, -DefaultSize),
-                 Vector3Single( DefaultSize,  DefaultSize,  DefaultSize)) else
-  begin
-    BoxSizes := Box.Sizes;
-    Box.Data[0] := Box.Data[0] - BoxSizes;
-    Box.Data[1] := Box.Data[1] + BoxSizes;
-  end;
-  PositionSlider := TMenuVector3Sliders.Create(Self, Box, Light.FdLocation.Value);
-  PositionSlider.OnChange := @PositionChanged;
+  Box := SceneManagerLargerBox(SceneManager);
+  LocationSlider := TMenuVector3Sliders.Create(Self, Box, Light.SceneLocation);
+  LocationSlider.OnChange := @LocationChanged;
 
   AttenuationSlider := TMenuVector3Sliders.Create(Self,
     AttenuationRange, Light.FdAttenuation.Value);
   AttenuationSlider.OnChange := @AttenuationChanged;
 
-  PositionSlider.AddToMenu(Self, 'Position', 'X', 'Y', 'Z');
+  LocationSlider.AddToMenu(Self, 'Scene Location', 'X', 'Y', 'Z');
   AttenuationSlider.AddToMenu(Self, 'Attenuation', 'Constant' , 'Linear', 'Quadratic');
+
+  GizmoTransform.Exists := true;
+  { Make sure camera information is updated, to update billboard orientation.
+    TODO: This should not be needed, should be handled on engine side to keep
+    billboards updated. See TODO in CastleSceneCore unit. }
+  GizmoTransform.CameraChanged(SceneManager.RequiredCamera);
+  GizmoTransform.Translation := Light.SceneLocation;
 end;
 
-procedure TPositionalLightMenu.PositionChanged(Sender: TObject);
+procedure TPositionalLightMenu.LocationChanged(Sender: TObject);
 begin
-  Light.Location := PositionSlider.Value;
+  Light.SceneLocation := LocationSlider.Value;
+  GizmoTransform.Translation := LocationSlider.Value;
 end;
 
 procedure TPositionalLightMenu.AttenuationChanged(Sender: TObject);
 begin
   Light.Attenuation := AttenuationSlider.Value;
+end;
+
+procedure TPositionalLightMenu.ClickBack(Sender: TObject);
+begin
+  GizmoTransform.Exists := false;
+  inherited;
 end;
 
 { TSpot1LightMenu ------------------------------------------------------- }

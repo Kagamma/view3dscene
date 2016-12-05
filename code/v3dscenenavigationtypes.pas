@@ -1,5 +1,5 @@
 {
-  Copyright 2003-2014 Michalis Kamburelis.
+  Copyright 2003-2016 Michalis Kamburelis.
 
   This file is part of "view3dscene".
 
@@ -15,7 +15,7 @@
 
   You should have received a copy of the GNU General Public License
   along with "view3dscene"; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
 
   ----------------------------------------------------------------------------
 }
@@ -168,7 +168,7 @@ procedure TNavigationTypeButton.TooltipRender;
     Theme.Draw(R, tiTooltip);
     GLImage.Draw(R.Left + ImageMargin, R.Bottom + ImageMargin);
     { we decrease R.Top to overdraw the tooltip image border }
-    ImageTooltipArrow.Draw(Left + (Width - ImageTooltipArrow.Width) div 2, R.Top - 1);
+    ImageTooltipArrow.Draw(Left + (CalculatedWidth - ImageTooltipArrow.Width) div 2, R.Top - 1);
   end;
 
 begin

@@ -1,5 +1,5 @@
 {
-  Copyright 2002-2014 Michalis Kamburelis.
+  Copyright 2002-2016 Michalis Kamburelis.
 
   This file is part of "view3dscene".
 
@@ -15,7 +15,7 @@
 
   You should have received a copy of the GNU General Public License
   along with "view3dscene"; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
 
   ----------------------------------------------------------------------------
 }
@@ -65,7 +65,7 @@ uses CastleUtils, SysUtils, CastleVectors, CastleBoxes, Classes, CastleClassUtil
   CastleControlsImages, CastleGLBoxes,
   { VRML/X3D (and possibly OpenGL) related units: }
   X3DFields, CastleShapeOctree, X3DNodes, X3DLoad, CastleScene, X3DTriangles,
-  CastleSceneCore, X3DNodesDetailOptions, X3DCameraUtils, CastleBackground,
+  CastleSceneCore, X3DCameraUtils, CastleBackground,
   CastleRenderer, CastleShapes, CastleRenderingCamera, X3DShadowMaps, CastleSceneManager,
   CastleMaterialProperties,
   { view3dscene-specific units: }
@@ -98,6 +98,9 @@ var
     This way we're preserving values of all Attributes.Xxx when opening new scene
     from "Open" menu item. }
   Scene: TCastleScene;
+  SceneBoundingBox: TCastleScene;
+  SceneBoundingBoxTransform: TTransformNode;
+  SceneBoundingBoxBox: TBoxNode;
   SceneURL: string;
 
   SelectedItem: PTriangle;
@@ -584,13 +587,13 @@ begin
 
     OctreeDisplay(Scene);
 
-    if ShowBBox then
+    SceneBoundingBox.Exists := ShowBBox and not Scene.BoundingBox.IsEmpty;
+    if SceneBoundingBox.Exists then
     begin
-      {$ifndef OpenGLES} //TODO-es
-      glColorv(Green);
-      if not Scene.BoundingBox.IsEmpty then
-        glDrawBox3DWire(Scene.BoundingBox);
-      {$endif}
+      { Use Scene.Attributes.LineWidth for our visualizations as well }
+      SceneBoundingBox.Attributes.LineWidth := Scene.Attributes.LineWidth;
+      SceneBoundingBoxTransform.Translation := Scene.BoundingBox.Middle;
+      SceneBoundingBoxBox.Size := Scene.BoundingBox.Sizes;
     end;
 
     { Note that there is no sense in showing viewing frustum in
@@ -649,6 +652,9 @@ begin
       glDrawCornerMarkers(SelectedShape.BoundingBox);
       {$endif}
     end;
+  end else
+  begin
+    SceneBoundingBox.Exists := false;
   end;
 end;
 
@@ -846,6 +852,35 @@ begin
   UpdateWarningsButton;
   if Window <> nil then
     Window.Invalidate;
+end;
+
+procedure InitializeSceneBoundingBox;
+var
+  RootNode: TX3DRootNode;
+  Shape: TShapeNode;
+  Material: TMaterialNode;
+begin
+  SceneBoundingBoxBox := TBoxNode.Create;
+
+  Material := TMaterialNode.Create;
+  Material.ForcePureEmissive;
+  Material.EmissiveColor := GreenRGB;
+
+  Shape := TShapeNode.Create;
+  Shape.Geometry := SceneBoundingBoxBox;
+  Shape.Shading := shWireframe;
+  Shape.Material := Material;
+
+  SceneBoundingBoxTransform := TTransformNode.Create;
+  SceneBoundingBoxTransform.FdChildren.Add(Shape);
+
+  RootNode := TX3DRootNode.Create;
+  RootNode.FdChildren.Add(SceneBoundingBoxTransform);
+
+  SceneBoundingBox.Load(RootNode, true);
+  SceneBoundingBox.Collides := false;
+  SceneBoundingBox.Pickable := false;
+  SceneBoundingBox.CastShadowVolumes := false;
 end;
 
 procedure SceneOctreeCreate;
@@ -1554,34 +1589,16 @@ end;
 
 procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
 
-  procedure ChangeGravityUp;
-  var Answer: string;
-      NewUp: TVector3Single;
+  procedure MakeGravityUp(const NewUp: TVector3Single);
+  var
+    Pos, Dir, Up, GravityUp: TVector3Single;
   begin
-   if Camera.NavigationClass = ncWalk then
-   begin
-    Answer := '';
-    if MessageInputQuery(Window,
-      'Input new camera up vector (three float values).' +nl+nl+
-      'This vector will be used as new gravity upward vector. ' +
-      'This vector must not be zero vector.', Answer) then
-    begin
-
-     try
-      NewUp := Vector3SingleFromStr(Answer);
-     except
-      on E: EConvertError do
-      begin
-       MessageOK(Window, 'Incorrect vector value : '+E.Message);
-       Exit;
-      end;
-     end;
-
-     Camera.Walk.GravityUp := NewUp;
-     Window.Invalidate;
-    end;
-   end else
-    MessageOK(Window, SNavigationClassWalkNeeded);
+    Camera.GetView(Pos, Dir, Up, GravityUp);
+    if VectorsParallel(Dir, NewUp) then
+      Dir := AnyOrthogonalVector(NewUp);
+    Up := NewUp;
+    GravityUp := NewUp;
+    Camera.SetView(Pos, Dir, Up, GravityUp, false);
   end;
 
   procedure ChangeMoveSpeed;
@@ -1637,7 +1654,7 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
       'Note that this is the "on display" playing speed.' +nl+
       nl+
       '- For baked ' +
-      'animations (like from Kanim or MD3 files), this means ' +
+      'animations (like from castle-anim-frames or MD3 files), this means ' +
       'that internally number of precalculated animation frames ' +
       'doesn''t change. Which means that slowing this speed too much ' +
       'leads to noticeably "jagged" animations.' +nl+
@@ -1666,7 +1683,7 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
       'loaded animation).' +nl+
       nl+
       '- For pracalculated ' +
-      'animations (like from Kanim or MD3 files), changing this actually changes ' +
+      'animations (like from castle-anim-frames or MD3 files), changing this actually changes ' +
       'the density of precalculated animation frames. Which means that ' +
       'this is the more resource-consuming, but also better ' +
       'method of changing animation speed: even if you slow down ' +
@@ -2358,7 +2375,7 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
   begin
     if SceneAnimation.ScenesCount <> 1 then
     begin
-      MessageOK(Window, 'This is not possible when you already have a precalculated animation (like loaded from Kanim or MD3 file).');
+      MessageOK(Window, 'This is not possible when you already have a precalculated animation (like loaded from castle-anim-frames or MD3 file).');
       Exit;
     end;
 
@@ -2965,7 +2982,6 @@ begin
          UpdateStatusToolbarVisible;
        end;
   123: SetCollisions(not Scene.Collides, false);
-  124: ChangeGravityUp;
   125: Raytrace;
   150: ScreenShotImage(SRemoveMnemonics(MenuItem.Caption), false);
   151: ScreenShotImage(SRemoveMnemonics(MenuItem.Caption), true);
@@ -3078,6 +3094,9 @@ begin
   2000: SetLimitFPS;
   2010: EnableNetwork := not EnableNetwork;
   2020: EnableFileWatcher := not EnableFileWatcher;
+
+  3010: MakeGravityUp(Vector3Single(0, 1, 0));
+  3020: MakeGravityUp(Vector3Single(0, 0, 1));
 
   1100..1199: SetMinificationFilter(
     TMinificationFilter  (MenuItem.IntData-1100), Scene);
@@ -3311,9 +3330,10 @@ begin
         'Move with Respect to Gravity Vector',          203,
         Camera.Walk.PreferGravityUpForMoving, true);
       M2.Append(MenuPreferGravityUpForMoving);
-      M2.Append(TMenuItem.Create('Change Gravity Up Vector ...',  124));
       M2.Append(TMenuItem.Create('Change Move Speed...', 205));
       M.Append(M2);
+    M.Append(TMenuItem.Create('Set Up (and Gravity Up) +Y',  3010));
+    M.Append(TMenuItem.Create('Set Up (and Gravity Up) +Z',  3020));
     MenuCollisions := TMenuItemChecked.Create(
       '_Collision Detection and Picking',                123, CtrlC,
         Scene.Collides, true);
@@ -3539,8 +3559,8 @@ var
   NextLeft, ButtonsHeight, ButtonsBottom: Integer;
 begin
   ButtonsHeight := Max(
-    CameraButtons[ntExamine { any button }].Height,
-    WarningsButton.Height);
+    CameraButtons[ntExamine { any button }].CalculatedHeight,
+    WarningsButton.CalculatedHeight);
   ButtonsBottom := Window.Height - ButtonsHeight - ToolbarMargin;
 
   NextLeft := ToolbarMargin;
@@ -3556,7 +3576,7 @@ begin
 
     OpenButton.Left := NextLeft;
     OpenButton.Bottom := ButtonsBottom;
-    NextLeft += OpenButton.Width + ButtonsSeparatorsMargin;
+    NextLeft += OpenButton.CalculatedWidth + ButtonsSeparatorsMargin;
 
     ToolbarPanel.VerticalSeparators[0] := NextLeft;
     NextLeft += ToolbarPanel.SeparatorSize + ButtonsSeparatorsMargin;
@@ -3568,7 +3588,7 @@ begin
       begin
         CameraButtons[NT].Left := NextLeft;
         CameraButtons[NT].Bottom := ButtonsBottom;
-        NextLeft += CameraButtons[NT].Width + ButtonsMargin;
+        NextLeft += CameraButtons[NT].CalculatedWidth + ButtonsMargin;
       end;
     NextLeft += -ButtonsMargin + ButtonsSeparatorsMargin;
 
@@ -3577,15 +3597,15 @@ begin
 
     CollisionsButton.Left := NextLeft;
     CollisionsButton.Bottom := ButtonsBottom;
-    NextLeft += CollisionsButton.Width + ButtonsMargin;
+    NextLeft += CollisionsButton.CalculatedWidth + ButtonsMargin;
 
     ScreenshotButton.Left := NextLeft;
     ScreenshotButton.Bottom := ButtonsBottom;
-    NextLeft += ScreenshotButton.Width + ButtonsMargin;
+    NextLeft += ScreenshotButton.CalculatedWidth + ButtonsMargin;
   end;
 
   WarningsButton.Left := Max(NextLeft,
-    Window.Width - WarningsButton.Width - ToolbarMargin);
+    Window.Width - WarningsButton.CalculatedWidth - ToolbarMargin);
   WarningsButton.Bottom := ButtonsBottom;
 
   ResizeViewports(V3DSceneWindow.Window, SceneManager);
@@ -3795,7 +3815,6 @@ const
              '                        Set initial navigation style.' +NL+
              '                        Deprecated, consider using NavigationInfo node' +NL+
              '                        inside your scene instead.' +NL+
-             X3DNodesDetailOptionsHelp +NL+
              NL+
              SCastleEngineProgramHelpSuffix(DisplayApplicationName, Version, true));
            Halt;
@@ -3889,7 +3908,6 @@ begin
   SoundEngine.ParseParameters;
   CamerasParseParameters;
   ViewpointsParseParameters;
-  X3DNodesDetailOptionsParse;
   Parameters.Parse(Options, @OptionProc, nil);
   { the most important param : URL to load }
   if Parameters.High > 1 then
@@ -3940,6 +3958,10 @@ begin
       AttributesLoadFromConfig(Scene.Attributes);
       SceneManager.Items.Add(Scene);
       SceneManager.MainScene := Scene;
+
+      SceneBoundingBox := TCastleScene.Create(Scene);
+      SceneManager.Items.Add(SceneBoundingBox);
+      InitializeSceneBoundingBox;
 
       InitCameras(SceneManager);
       InitTextureFilters(Scene);

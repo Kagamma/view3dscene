@@ -1,5 +1,5 @@
 {
-  Copyright 2010-2014 Michalis Kamburelis.
+  Copyright 2010-2016 Michalis Kamburelis.
 
   This file is part of "view3dscene".
 
@@ -15,7 +15,7 @@
 
   You should have received a copy of the GNU General Public License
   along with "view3dscene"; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
 
   ----------------------------------------------------------------------------
 }
@@ -117,7 +117,7 @@ procedure SetViewportsConfig(const Value: TViewportsConfig;
   begin
     Viewport.SceneManager := SceneManager;
     Viewport.FullSize := false;
-    Window.Controls.InsertFrontIfNotExists(Viewport);
+    Window.Controls.InsertBackIfNotExists(Viewport);
   end;
 
 var
@@ -129,9 +129,6 @@ begin
     OldValue := ViewportsConfig;
     ViewportsConfig := Value;
     SceneManager.FullSize := ViewportsConfig = vc1;
-    if ViewportsConfig = vc1 then
-      Window.Controls.Remove(Background) else
-      Window.Controls.InsertBackIfNotExists(Background);
     case ViewportsConfig of
       vc1:
         begin
@@ -171,6 +168,12 @@ begin
         end;
       else raise EInternalError.Create('ViewportsConfig?');
     end;
+    { Do this at the end, to make Background to most in the back.
+      Also, always remove first, and the InsertBack -- to again
+      make sure Background is in the back (instead of doing InsertBackIfNotExists). }
+    Window.Controls.Remove(Background);
+    if ViewportsConfig <> vc1 then
+      Window.Controls.InsertBack(Background);
     ResizeViewports(Window, SceneManager);
   end;
 end;
