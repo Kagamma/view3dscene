@@ -1,5 +1,5 @@
 {
-  Copyright 2002-2017 Michalis Kamburelis.
+  Copyright 2002-2017 Michalis Kamburelis, Trung Le (kagamma).
 
   This file is part of "view3dscene".
 

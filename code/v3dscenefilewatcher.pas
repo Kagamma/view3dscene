@@ -1,5 +1,5 @@
 {
-  Copyright 2016 kagamma (kgm).
+  Copyright 2016 Trung Le (kagamma).
 
   This file is part of "view3dscene".
 
