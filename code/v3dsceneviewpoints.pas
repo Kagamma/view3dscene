@@ -1,5 +1,5 @@
 {
-  Copyright 2004-2016 Michalis Kamburelis.
+  Copyright 2004-2017 Michalis Kamburelis.
 
   This file is part of "view3dscene".
 
@@ -137,9 +137,9 @@ end;
 function NodeToCaption(const Node: TX3DNode): string;
 begin
   if Node is TAbstractViewpointNode then
-    Result := TAbstractViewpointNode(Node).Description else
+    Result := TAbstractViewpointNode(Node).SmartDescription else
   if Node is TViewpointGroupNode then
-    Result := TViewpointGroupNode(Node).Description else
+    Result := TViewpointGroupNode(Node).SmartDescription else
     Result := '';
   Result := SForCaption(Result);
 end;

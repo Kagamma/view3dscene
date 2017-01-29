@@ -1,5 +1,5 @@
 {
-  Copyright 2002-2016 Michalis Kamburelis.
+  Copyright 2002-2017 Michalis Kamburelis.
 
   This file is part of "view3dscene".
 
@@ -27,7 +27,7 @@ unit V3DSceneOctreeVisualize;
 
 interface
 
-uses CastleOctree, CastleWindow, CastleScene;
+uses CastleInternalOctree, CastleWindow, CastleScene;
 
 type
   TOctreeDisplay = object

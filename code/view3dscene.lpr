@@ -1,5 +1,5 @@
 {
-  Copyright 2002-2016 Michalis Kamburelis.
+  Copyright 2002-2017 Michalis Kamburelis.
 
   This file is part of "view3dscene".
 
@@ -64,7 +64,7 @@ uses CastleUtils, SysUtils, CastleVectors, CastleBoxes, Classes, CastleClassUtil
   CastleGLCubeMaps, CastleControls, CastleGLShaders,
   CastleControlsImages, CastleGLBoxes,
   { VRML/X3D (and possibly OpenGL) related units: }
-  X3DFields, CastleShapeOctree, X3DNodes, X3DLoad, CastleScene, X3DTriangles,
+  X3DFields, CastleInternalShapeOctree, X3DNodes, X3DLoad, CastleScene, X3DTriangles,
   CastleSceneCore, X3DCameraUtils, CastleBackground,
   CastleRenderer, CastleShapes, CastleRenderingCamera, X3DShadowMaps, CastleSceneManager,
   CastleMaterialProperties,
@@ -155,6 +155,7 @@ var
   MenuAnimationTimePlaying: TMenuItemChecked;
 
   ControlsOnScreenshot: boolean = false;
+  HideExtraScenesForScreenshot: boolean = false;
 
 { Helper class ---------------------------------------------------------------
 
@@ -342,7 +343,8 @@ end;
 procedure PrepareResources(AllowProgress: boolean);
 begin
   if AllowProgress then
-    SceneManager.PrepareResources('Preparing animation') else
+    SceneManager.PrepareResources('Preparing animation')
+  else
     SceneManager.PrepareResources;
 end;
 
@@ -513,10 +515,10 @@ begin
 
   if Scene.Attributes.UseOcclusionQuery or
      Scene.Attributes.UseHierarchicalOcclusionQuery then
-    S := Format(' (+ <font color="#%s">%d boxes</font> to occl query)',
+    S := Format(' (+ <font color="#%s">%d boxes</font> for occlusion query)',
            [ ValueColor, Statistics.BoxesOcclusionQueriedCount ]) else
     S := '';
-  Text.Append(Format('Rendered Shapes : <font color="#%s">%d%s of %d</font> ',
+  Text.Append(Format('Rendered Shapes: <font color="#%s">%d%s / %d</font> ',
     [ ValueColor,
       Statistics.ShapesRendered, S,
       Statistics.ShapesVisible ]) + OctreeDisplayStatus);
@@ -524,8 +526,8 @@ begin
   if Scene.TimeAtLoad = 0.0 then
     S := Format('World time: <font color="#%s">%d</font>',
       [ValueColor, Trunc(Scene.Time)]) else
-    S := Format('World time: <font color="#%s">load time + %d = %d</font>',
-      [ValueColor, Trunc(Scene.Time - Scene.TimeAtLoad), Trunc(Scene.Time)]);
+    S := Format('World time: <font color="#%s">load time + %d</font>',
+      [ValueColor, Trunc(Scene.Time - Scene.TimeAtLoad)]);
   if not AnimationTimePlaying then
     S += ' (paused)';
   if not ProcessEventsWanted then
@@ -546,7 +548,24 @@ end;
 
 { TCastleWindowCustom callbacks --------------------------------------------------------- }
 
-{ Render visualization of various stuff, like bounding box, octree and such. }
+{ Setup visibility of extra scenes, like bounding box. }
+procedure SetupExtraScenes;
+begin
+  SceneBoundingBox.Exists :=
+    (RenderingCamera.Target = rtScreen) and
+    (not HideExtraScenesForScreenshot) and
+    ShowBBox and
+    (not Scene.BoundingBox.IsEmpty);
+  if SceneBoundingBox.Exists then
+  begin
+    { Use Scene.Attributes.LineWidth for our visualizations as well }
+    SceneBoundingBox.Attributes.LineWidth := Scene.Attributes.LineWidth;
+    SceneBoundingBoxTransform.Translation := Scene.BoundingBox.Center;
+    SceneBoundingBoxBox.Size := Scene.BoundingBox.Size;
+  end;
+end;
+
+{ Render visualization of various stuff, like octree and such. }
 procedure RenderVisualizations;
 
   procedure RenderFrustum(AlwaysVisible: boolean);
@@ -576,7 +595,7 @@ procedure RenderVisualizations;
   end;
 
 begin
-  if (RenderingCamera.Target = rtScreen) and (not MakingScreenShot) then
+  if (RenderingCamera.Target = rtScreen) and (not HideExtraScenesForScreenshot) then
   begin
     { Visualization below depends on DEPTH_TEST enabled
       (and after rendering scene, it is disabled by TGLRenderer.RenderCleanState) }
@@ -586,15 +605,6 @@ begin
     RenderContext.LineWidth := Scene.Attributes.LineWidth;
 
     OctreeDisplay(Scene);
-
-    SceneBoundingBox.Exists := ShowBBox and not Scene.BoundingBox.IsEmpty;
-    if SceneBoundingBox.Exists then
-    begin
-      { Use Scene.Attributes.LineWidth for our visualizations as well }
-      SceneBoundingBox.Attributes.LineWidth := Scene.Attributes.LineWidth;
-      SceneBoundingBoxTransform.Translation := Scene.BoundingBox.Middle;
-      SceneBoundingBoxBox.Size := Scene.BoundingBox.Sizes;
-    end;
 
     { Note that there is no sense in showing viewing frustum in
       Camera.NavigationClass <> ncExamine, since viewing frustum should
@@ -660,6 +670,7 @@ end;
 
 procedure TV3DSceneManager.Render3D(const Params: TRenderParams);
 begin
+  SetupExtraScenes;
   inherited;
   { RenderVisualizations are opaque, so they should be rendered here
     to correctly mix with partially transparent 3D scenes.
@@ -706,6 +717,7 @@ end;
 
 procedure TV3DViewport.Render3D(const Params: TRenderParams);
 begin
+  SetupExtraScenes;
   inherited;
   { RenderVisualizations are opaque, so they should be rendered here
     to correctly mix with partially transparent 3D scenes.
@@ -870,6 +882,7 @@ begin
   Shape.Geometry := SceneBoundingBoxBox;
   Shape.Shading := shWireframe;
   Shape.Material := Material;
+  Shape.Appearance.ShadowCaster := false;
 
   SceneBoundingBoxTransform := TTransformNode.Create;
   SceneBoundingBoxTransform.FdChildren.Add(Shape);
@@ -1121,7 +1134,10 @@ procedure LoadScene(ASceneURL: string;
 var
   RootNode: TX3DRootNode;
   SavedSceneWarnings: TSceneWarnings;
+  StartTime, TimeLoadX3D, TimeLoadScene, TimePrepareResources: TProcessTimerResult;
 begin
+  StartTime := ProcessTimer;
+
   { We have to clear SceneWarnings here (not later)
     to catch also all warnings raised during parsing of the file.
     This causes a potential problem: if loading the scene will fail,
@@ -1151,6 +1167,8 @@ begin
     {$endif CATCH_EXCEPTIONS}
   finally FreeAndNil(SavedSceneWarnings) end;
 
+  TimeLoadX3D := ProcessTimer;
+
   {$ifdef CATCH_EXCEPTIONS}
   try
   {$endif CATCH_EXCEPTIONS}
@@ -1179,6 +1197,8 @@ begin
   end;
   {$endif CATCH_EXCEPTIONS}
 
+  TimeLoadScene := ProcessTimer;
+
   { For batch operation (making screenshots), do not save the scene
     on "recent files" menu. This also applies when using view3dscene
     as a thumbnailer. }
@@ -1192,6 +1212,20 @@ begin
   PrepareResources(true);
   WarningsButtonEnabled := true;
   UpdateWarningsButton;
+
+  TimePrepareResources := ProcessTimer;
+
+  WritelnLogMultiline('Loading', Format(
+    'Loaded "%s" with dependencies in %f seconds:' + NL +
+    '  %f to load from disk (create X3D graph)' + NL +
+    '  %f to initialize scene (initialize shapes tree, collisions...)' + NL +
+    '  %f to prepare resources (load textures, prepare OpenGL resources...)',
+    [ URIDisplay(ASceneURL),
+      ProcessTimerSeconds(TimePrepareResources, StartTime),
+      ProcessTimerSeconds(TimeLoadX3D, StartTime),
+      ProcessTimerSeconds(TimeLoadScene, TimeLoadX3D),
+      ProcessTimerSeconds(TimePrepareResources, TimeLoadScene)
+    ]));
 end;
 
 { Load special "clear" and "welcome" scenes.
@@ -1349,7 +1383,12 @@ begin
     Window.Container.EventRender;
   end else
   begin
-    ViewportsRender;
+    { Many controls are hidden simply because ViewportsRender doesn't render them.
+      But for extra 3D scenes within scene manager, we need to make sure
+      nearest SetupExtraScenes will hide them. }
+    HideExtraScenesForScreenshot := true;
+    ViewportsRender(Window.Container);
+    HideExtraScenesForScreenshot := false;
   end;
   Result := SaveScreen_NoFlush(ImageClass, Window.Rect, ReadBuffer);
 end;
@@ -1457,8 +1496,8 @@ procedure TGamePlaceholdersRemover.Remove(
 
   function IsPlaceholder(const Prefix: string): boolean;
   begin
-    Result := IsPrefix(Prefix, Node.NodeName) or
-              IsPrefix('OB_' + Prefix, Node.NodeName);
+    Result := IsPrefix(Prefix, Node.X3DName) or
+              IsPrefix('OB_' + Prefix, Node.X3DName);
   end;
 
 begin
@@ -1469,16 +1508,16 @@ begin
      IsPlaceholder('CasSector') or
      { Below are special only on specific castle1 levels, see GameLevelSpecific.
        For historical reasons, they don't use 'Cas' prefix. }
-     (Node.NodeName = 'LevelExitBox') or
-     IsPrefix('WerewolfAppear_', Node.NodeName) or
-     (Node.NodeName = 'GateExitBox') or
-     (Node.NodeName = 'Teleport1Box') or
-     (Node.NodeName = 'Teleport2Box') or
-     (Node.NodeName = 'SacrilegeBox') or
-     IsPrefix('SacrilegeGhost_', Node.NodeName) or
-     IsPrefix('SwordGhost_', Node.NodeName) or
-     (Node.NodeName = 'Elevator49DownBox') or
-     (Node.NodeName = 'Elev9a9bPickBox') then
+     (Node.X3DName = 'LevelExitBox') or
+     IsPrefix('WerewolfAppear_', Node.X3DName) or
+     (Node.X3DName = 'GateExitBox') or
+     (Node.X3DName = 'Teleport1Box') or
+     (Node.X3DName = 'Teleport2Box') or
+     (Node.X3DName = 'SacrilegeBox') or
+     IsPrefix('SacrilegeGhost_', Node.X3DName) or
+     IsPrefix('SwordGhost_', Node.X3DName) or
+     (Node.X3DName = 'Elevator49DownBox') or
+     (Node.X3DName = 'Elev9a9bPickBox') then
   begin
     Node := nil;
     Inc(Count);
@@ -1647,56 +1686,31 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
   begin
     S := Scene.TimePlayingSpeed;
     if MessageInputQuery(Window,
-      'Playing speed 1.0 means that 1 time unit is 1 second.' +nl+
-      '0.5 makes playing animation two times slower,' +nl+
-      '2.0 makes it two times faster etc.' +nl+
-      nl+
-      'Note that this is the "on display" playing speed.' +nl+
-      nl+
-      '- For baked ' +
-      'animations (like from castle-anim-frames or MD3 files), this means ' +
-      'that internally number of precalculated animation frames ' +
-      'doesn''t change. Which means that slowing this speed too much ' +
-      'leads to noticeably "jagged" animations.' +nl+
-      nl+
-      '- For interactive animations (played and calculated from a single ' +
-      'VRML / X3D file, e.g. by interpolators) this is perfect, ' +
-      'animation always remains smooth.' +nl+
-      nl+
-      'New "on display" playing speed:', S) then
+      'Adjust the playing speed to slow down, or make faster, the animation. For example, "0.5" makes playing animation two times slower,"2.0" makes it two times faster.' + NL +
+      NL +
+      'Note: Using this to slow down a "baked animation" (from castle-anim-frames or MD3 files) may look bad, as the same number of static frames will be just played slower. Increase "Baked Animation Smoothness" and reload the animation to counteract this.' + NL +
+      NL +
+      'New playing speed:', S) then
       Scene.TimePlayingSpeed := S;
   end;
 
-(*
-  TODO: this should control only baking setting, like default ScenesPerTime for TNodeInterpolator.
-
-  procedure ChangeTimeSpeedWhenLoading;
+  procedure ChangeBakedAnimationSmoothness;
+  var
+    S: Single;
   begin
-    MessageInputQuery(Window,
-      'Playing speed 1.0 means that 1 time unit is 1 second.' +nl+
-      '0.5 makes playing animation two times slower,' +nl+
-      '2.0 makes it two times faster etc.' +nl+
-      nl+
-      'Note that this is the "on loading" playing speed. Which means ' +
-      'it''s only applied when loading animation from file ' +
-      '(you can use "File -> Reopen" command to apply this to currently ' +
-      'loaded animation).' +nl+
-      nl+
-      '- For pracalculated ' +
-      'animations (like from castle-anim-frames or MD3 files), changing this actually changes ' +
-      'the density of precalculated animation frames. Which means that ' +
-      'this is the more resource-consuming, but also better ' +
-      'method of changing animation speed: even if you slow down ' +
-      'this playing speed much, the animation will remain smooth.' +nl+
-      nl+
-      '- For interactive animations (played and calculated from a single ' +
-      'VRML / X3D file, e.g. by interpolators) this has no effect, ' +
-      'as no frames are precalculated at loading. Use "on display" playing speed ' +
-      'instead.' +nl+
-      nl+
-      'New "on loading" playing speed:', AnimationTimeSpeedWhenLoading);
+    S := BakedAnimationSmoothness;
+    if MessageInputQuery(Window,
+      'Adjust the number of static frames generated when loading a "baked animation" (from castle-anim-frames or MD3 files). ' + NL +
+      NL +
+      'Increase this to improve the quality of baked animation (even when it''s slowed down by changing "playing speed"). But it costs memory, and the loading time will increase too. Lower this value to have faster loading, but worse quality.' + NL +
+      NL +
+      'This is only applied when loading animation from file. You can use "File -> Reopen" command to apply this to the currently loaded animation.' + NL +
+      NL +
+      'This has no effect on non-baked animations, like played from X3D or Spine JSON.' + NL+
+      NL +
+      'New baked animation smoothness:', S) then
+      BakedAnimationSmoothness := S;
   end;
-*)
 
   procedure SelectedShowInformation;
   var
@@ -1724,9 +1738,9 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
            [VectorToNiceStr(SelectedPointWorld),
             TriangleToNiceStr(SelectedItem^.World.Triangle),
             PointerToStr(SelectedItem),
-            SelectedGeometry.NodeName,
-            SelectedShape.OriginalGeometry.NodeTypeName,
-            SelectedGeometry.NodeTypeName,
+            SelectedGeometry.X3DName,
+            SelectedShape.OriginalGeometry.X3DType,
+            SelectedGeometry.X3DType,
             SelectedShape.GeometryParentNodeName,
             SelectedShape.GeometryGrandParentNodeName,
             SelectedShape.GeometryGrandGrandParentNodeName,
@@ -1787,7 +1801,7 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
                  '  specular : %s' +nl+
                  '  shininess : %s' +nl+
                  '  transparency : %s',
-                 [ M2.NodeName,
+                 [ M2.X3DName,
                    FloatToNiceStr(M2.FdAmbientIntensity.Value),
                    VectorToNiceStr(M2.FdDiffuseColor.Value),
                    VectorToNiceStr(M2.FdSpecularColor.Value),
@@ -1809,7 +1823,7 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
             '  specularColor[0] : %s' +nl+
             '  shininess[0] : %s' +nl+
             '  transparency[0] : %s',
-            [ M1.NodeName,
+            [ M1.Name,
               VectorToNiceStr(M1.AmbientColor3Single(0)),
               VectorToNiceStr(M1.DiffuseColor3Single(0)),
               VectorToNiceStr(M1.SpecularColor3Single(0)),
@@ -1829,7 +1843,7 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
             '  specularColor[0] : %s' +nl+
             '  shininess[0] : %s' +nl+
             '  transparency[0] : %s',
-            [M1.NodeName, S1, S2, S3, S4, S5]);
+            [M1.X3DName, S1, S2, S3, S4, S5]);
       end;
     end;
     ShowAndWrite(S);
@@ -1969,7 +1983,7 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
       TexCoords := TexCoordsField.Items;
     end else
     begin
-      MessageOK(Window, Format('Cannot remove faces from "%s" node.', [Geometry.NodeTypeName]));
+      MessageOK(Window, Format('Cannot remove faces from "%s" node.', [Geometry.X3DType]));
       Exit;
     end;
 
@@ -1988,7 +2002,7 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
                     SelectedItem^.Face.IndexBegin + 1;
 
       Coords.DeleteRange(IndexBegin, IndexCount);
-      Scene.ChangedField(CoordsField);
+      CoordsField.Changed;
 
       { Texture coordinates, if not empty, have always (both in VRML 1.0
         and VRML 2.0 / X3D IndexedFaceSet nodes, and in IndexedTriangleMesh
@@ -1998,7 +2012,7 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
       if TexCoords <> nil then
       begin
         TexCoords.DeleteRange(IndexBegin, IndexCount);
-        Scene.ChangedField(TexCoordsField);
+        TexCoordsField.Changed;
       end;
     finally Dec(DisableAutoDynamicGeometry) end;
   end;
@@ -2272,7 +2286,7 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
           FloatToRawStr(Box.Data[1, 2] - Box.Data[0, 2]) ]));
       *)
 
-      S1 := VectorToRawStr(Box.Middle);
+      S1 := VectorToRawStr(Box.Center);
       S2 := FloatToRawStr(Box.Data[1, 0] - Box.Data[0, 0]);
       S3 := FloatToRawStr(Box.Data[1, 1] - Box.Data[0, 1]);
       S4 := FloatToRawStr(Box.Data[1, 2] - Box.Data[0, 2]);
@@ -2393,7 +2407,7 @@ procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
     begin
       { Note: there's an inherent problem here since RootNode starts
         with state from current Time. This includes
-        TimeDependentNodeHandler state like IsActive, etc., but also
+        time-dependent nodes state like isActive, etc., but also
         the rest of VRML/X3D graph (e.g. if some events change some geometry
         or materials). While LoadFromEvents takes care to call
         SceneAnimation.ResetTime, this only resets time-dependent nodes and routes
@@ -3029,7 +3043,7 @@ begin
          Scene.TimePlaying := AnimationTimePlaying and ProcessEventsWanted;
        end;
   222: ChangeTimeSpeed;
-  //223: ChangeTimeSpeedWhenLoading;
+  223: ChangeBakedAnimationSmoothness;
 
   224: begin
          ProcessEventsWanted := not ProcessEventsWanted;
@@ -3152,7 +3166,7 @@ function CreateMainMenu: TMenu;
     for I := 0 to SoundEngine.Devices.Count - 1 do
     begin
       Radio := TMenuItemRadio.Create(
-        SQuoteMenuEntryCaption(SoundEngine.Devices[I].NiceName),
+        SQuoteMenuEntryCaption(SoundEngine.Devices[I].Caption),
         BaseIntData + I, SoundEngine.Devices[I].Name = SoundEngine.Device, true);
       if RadioGroup = nil then
         RadioGroup := Radio.Group else
@@ -3346,8 +3360,7 @@ begin
     CreateMenuNamedAnimations;
     M.Append(MenuNamedAnimations);
     M.Append(TMenuItem.Create('Playing Speed...', 222));
-    //M.Append(TMenuItem.Create('Playing Speed Slower or Faster (on display) ...', 222));
-    //M.Append(TMenuItem.Create('Playing Speed Slower or Faster (on loading) ...', 223));
+    M.Append(TMenuItem.Create('Baked Animation Smoothness ...', 223));
     M.Append(TMenuItemChecked.Create('Process VRML/X3D Events ("off" pauses also animation)', 224, ProcessEventsWanted, true));
     // M.Append(TMenuSeparator.Create);
     // M.Append(TMenuItem.Create('Precalculate Animation from VRML/X3D Events ...', 225));
@@ -3911,8 +3924,7 @@ begin
   Parameters.Parse(Options, @OptionProc, nil);
   { the most important param : URL to load }
   if Parameters.High > 1 then
-   raise EInvalidParams.Create('Excessive command-line parameters. '+
-     'Expected at most one URL to load') else
+    raise EInvalidParams.Create('Excessive command-line parameters. Expected at most one URL to load') else
   if Parameters.High = 1 then
   begin
     WasParam_SceneURL := true;
@@ -3920,6 +3932,8 @@ begin
   end;
 
   SceneManager := TV3DSceneManager.Create(nil);
+  { do not use lights from Scene on other scenes }
+  SceneManager.UseGlobalLights := false;
   Window.Controls.InsertBack(SceneManager);
   SceneManager.OnBoundViewpointChanged := @THelper(nil).BoundViewpointChanged;
   SceneManager.OnBoundNavigationInfoChanged := @THelper(nil).BoundNavigationInfoChanged;

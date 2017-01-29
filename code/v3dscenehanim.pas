@@ -1,5 +1,5 @@
 {
-  Copyright 2006-2016 Michalis Kamburelis.
+  Copyright 2006-2017 Michalis Kamburelis.
 
   This file is part of "view3dscene".
 
@@ -113,7 +113,7 @@ begin
       Inc(JointsProcessed);
 
       JointTransform := TTransformNode.Create(
-        Format('HAnimVisualization_JointTransform_%d_%s', [I, Joint.NodeName]),
+        Format('HAnimVisualization_JointTransform_%d_%s', [I, Joint.X3DName]),
           HumanoidNode.BaseUrl);
       JointTransform.FdTranslation.Value := Joint.FdCenter.Value;
       HumanoidNode.FdSkin.Add(JointTransform);
