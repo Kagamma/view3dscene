@@ -1599,23 +1599,22 @@ end;
 
 procedure Reopen;
 var
-  Pos, Dir, Up: TVector3Single;
-  NavigationType: TNavigationType;
+  Pos, Dir, Up: TVector3;
+  SavedNavigationType: TUserNavigationType;
 begin
   { reopen saves/restores camera view and navigation type,
     this makes it more useful }
-  NavigationType := Camera.NavigationType;
-  Camera.GetView(Pos, Dir, Up{, GravityUp});
+  SavedNavigationType := NavigationType;
+  MainViewport.Camera.GetView(Pos, Dir, Up{, GravityUp});
 
-  LoadScene(SceneURL, [], 0.0);
+  LoadScene(SceneURL, []);
 
   { restore view, without GravityUp (trying to preserve it goes wrong
     in case we're in Examine mode, then "reopen", then switch to "Walk"
     --- original scene's gravity is then lost) }
-  Camera.SetView(Pos, Dir, Up{, GravityUp});
+  MainViewport.Camera.SetView(Pos, Dir, Up{, GravityUp});
   { restore NavigationType }
-  Camera.NavigationType := NavigationType;
-  ViewportsSetNavigationType(Camera.NavigationType);
+  SetNavigationType(SavedNavigationType);
   UpdateCameraUI;
 end;
 
@@ -2756,27 +2755,6 @@ var
       LoadScene(URL, []);
   end;
 
-  procedure Reopen;
-  var
-    Pos, Dir, Up: TVector3;
-    SavedNavigationType: TUserNavigationType;
-  begin
-    { reopen saves/restores camera view and navigation type,
-      this makes it more useful }
-    SavedNavigationType := NavigationType;
-    MainViewport.Camera.GetView(Pos, Dir, Up{, GravityUp});
-
-    LoadScene(SceneURL, []);
-
-    { restore view, without GravityUp (trying to preserve it goes wrong
-      in case we're in Examine mode, then "reopen", then switch to "Walk"
-      --- original scene's gravity is then lost) }
-    MainViewport.Camera.SetView(Pos, Dir, Up{, GravityUp});
-    { restore NavigationType }
-    SetNavigationType(SavedNavigationType);
-    UpdateCameraUI;
-  end;
-
   function SceneVertexTriangleInfo(const Scene: TCastleScene): string;
   const
     SSceneInfoTriVertCounts_Same = 'Scene contains %d triangles and %d ' +
@@ -3110,9 +3088,7 @@ begin
         SetFillMode((FillMode + 1) mod (High(FillMode) + 1));
         FillModesMenu[FillMode].Checked := true;
       end;
-  2000: SetLimitFPS;
-  2010: EnableNetwork := not EnableNetwork;
-  2020: EnableFileWatcher := not EnableFileWatcher;
+    2020: EnableFileWatcher := not EnableFileWatcher;
 
     530: ChangeLineWidth;
 
@@ -3672,7 +3648,7 @@ begin
   URL := SceneURL;
   if Window.FileDialog('Open file', URL, true, Load3D_FileFilters) then
   begin
-    LoadScene(URL, [], 0.0); 
+    LoadScene(URL, []);
     SetupFileWatcher(URL);
   end;
 end;
@@ -4106,7 +4082,7 @@ begin
 
         if WasParam_SceneURL then
         begin
-          LoadScene(Param_SceneURL, Param_SceneChanges, Param_CameraRadius);
+          LoadScene(Param_SceneURL, Param_SceneChanges);
           SetupFileWatcher(Param_SceneURL);
         end
         else
