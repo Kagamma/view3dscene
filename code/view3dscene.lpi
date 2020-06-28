@@ -120,6 +120,7 @@
       <Unit20>
         <Filename Value="v3dsceneoctreevisualize.pas"/>
         <IsPartOfProject Value="True"/>
+        <UnitName Value="V3DSceneOctreeVisualize"/>
       </Unit20>
       <Unit21>
         <Filename Value="v3dsceneimages.pas"/>
@@ -136,6 +137,7 @@
       <Unit24>
         <Filename Value="v3dsceneantialiasing.pas"/>
         <IsPartOfProject Value="True"/>
+        <UnitName Value="V3DSceneAntiAliasing"/>
       </Unit24>
       <Unit25>
         <Filename Value="v3dsceneraytrace.pas"/>
@@ -148,6 +150,7 @@
       <Unit27>
         <Filename Value="v3dscenecaptions.pas"/>
         <IsPartOfProject Value="True"/>
+        <UnitName Value="V3DSceneCaptions"/>
       </Unit27>
       <Unit28>
         <Filename Value="screen_effects_edge_detect.glsl.inc"/>

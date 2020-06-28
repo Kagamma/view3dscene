@@ -82,7 +82,7 @@ uses SysUtils, Math, Classes,
   V3DSceneShadows, V3DSceneOctreeVisualize, V3DSceneMiscConfig, V3DSceneImages,
   V3DSceneScreenEffects, V3DSceneSkeletonVisualize, V3DSceneViewports, V3DSceneVersion,
   V3DSceneLightsEditor, V3DSceneWindow, V3DSceneStatus, V3DSceneNamedAnimations,
-  V3DSceneBoxes, V3DSceneInternalScenes, V3DSceneDialogBox;
+  V3DSceneBoxes, V3DSceneInternalScenes, V3DSceneDialogBox, V3DSceneFileWatcher;
 
 var
   ShowFrustum: boolean = false;
@@ -1597,6 +1597,28 @@ begin
   finally FreeAndNil(Image) end;
 end;
 
+procedure Reopen;
+var
+  Pos, Dir, Up: TVector3Single;
+  NavigationType: TNavigationType;
+begin
+  { reopen saves/restores camera view and navigation type,
+    this makes it more useful }
+  NavigationType := Camera.NavigationType;
+  Camera.GetView(Pos, Dir, Up{, GravityUp});
+
+  LoadScene(SceneURL, [], 0.0);
+
+  { restore view, without GravityUp (trying to preserve it goes wrong
+    in case we're in Examine mode, then "reopen", then switch to "Walk"
+    --- original scene's gravity is then lost) }
+  Camera.SetView(Pos, Dir, Up{, GravityUp});
+  { restore NavigationType }
+  Camera.NavigationType := NavigationType;
+  ViewportsSetNavigationType(Camera.NavigationType);
+  UpdateCameraUI;
+end;
+
 procedure MenuClick(Container: TUIContainer; MenuItem: TMenuItem);
 var
   WalkNavigation: TCastleWalkNavigation;
@@ -3088,6 +3110,9 @@ begin
         SetFillMode((FillMode + 1) mod (High(FillMode) + 1));
         FillModesMenu[FillMode].Checked := true;
       end;
+  2000: SetLimitFPS;
+  2010: EnableNetwork := not EnableNetwork;
+  2020: EnableFileWatcher := not EnableFileWatcher;
 
     530: ChangeLineWidth;
 
@@ -3248,6 +3273,9 @@ begin
       M2.Append(TMenuSeparator.Create);
       M2.Append(TMenuItemChecked.Create('Download Resources From Network', 2010,
         EnableNetwork, true));
+      M2.Append(TMenuSeparator.Create);
+      M2.Append(TMenuItemChecked.Create('Automatically Reload From Disk', 2020,
+        EnableFileWatcher, false));
       M.Append(M2);
     NextRecentMenuItem := TMenuSeparator.Create;
     M.Append(NextRecentMenuItem);
@@ -3642,8 +3670,11 @@ var
   URL: string;
 begin
   URL := SceneURL;
-  if Window.FileDialog('Open file', URL, true, LoadScene_FileFilters) then
-    LoadScene(URL, []);
+  if Window.FileDialog('Open file', URL, true, Load3D_FileFilters) then
+  begin
+    LoadScene(URL, [], 0.0); 
+    SetupFileWatcher(URL);
+  end;
 end;
 
 class procedure THelper.ClickNavigationTypeButton(Sender: TObject);
@@ -3949,6 +3980,9 @@ begin
     InitializeLog;
 
   Window := TCastleWindowBase.Create(Application);
+  OnReopen := @Reopen;
+  { }
+  Window := TCastleWindowCustom.Create(Application);
 
   Application.MainWindow := Window;
   Progress.UserInterface := WindowProgressInterface;
@@ -4071,7 +4105,11 @@ begin
         Window.Open(@RetryOpen);
 
         if WasParam_SceneURL then
-          LoadScene(Param_SceneURL, Param_SceneChanges) else
+        begin
+          LoadScene(Param_SceneURL, Param_SceneChanges, Param_CameraRadius);
+          SetupFileWatcher(Param_SceneURL);
+        end
+        else
           LoadWelcomeScene;
 
         if Param_EnableFixedFunction then
@@ -4083,7 +4121,12 @@ begin
           Exit;
         end;
 
-        Application.Run;
+        //Application.Run;
+        while Application.ProcessMessage(true, true) do
+        begin
+          { File watcher handling. }
+          WatchingFile;
+        end;
       finally FreeScene end;
 
       AttributesSaveToConfig(Scene.Attributes);
